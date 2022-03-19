@@ -39,7 +39,9 @@ private:
 
     void ReadLine(const string &line, std::vector<string> &vec);
 
-    inline string NodeNameString(const node_name_t &customerName);
+    uint8_t Int2charArray(char *buffer, bandwidth_t bandwidth);
+
+    inline uint8_t NodeName(char *buffer, const node_name_t &nodeName);
 
     inline node_name_t NodeName(const char *buffer, uint8_t len);
 
@@ -47,15 +49,15 @@ private:
 
     inline node_name_t NodeName(const char &ch1, const char &ch2);
 
-    inline base62_t Base62(const char &ch);
+    inline base62_t Base63(const char &ch);
 
     static const uint16_t QOS_MAX = 1000u;
     static const uint8_t MAX_N = 135u;
     static const uint8_t MAX_M = 35u;
     static const uint16_t MAX_T = 8928u;
 
-    static const node_name_t MAX_CUSTOMER_ID = 62 * 62 + 62;
-    static const node_name_t MAX_SITE_ID = 62 * 62 + 62;
+    static const node_name_t MAX_CUSTOMER_ID = 62 * 63 + 63;
+    static const node_name_t MAX_SITE_ID = 62 * 63 + 63;
 
     static const uint32_t OUTPUT_BUFFER_SIZE = 1 << 12;
 
@@ -71,20 +73,16 @@ private:
     qos_t qosLimit;
 
     // id -> name
-    // std::vector<node_name_t> customerNameMap;
-    std::vector<string> customerNameMap;
+    std::vector<node_name_t> customerNameMap;
 
     // name -> id
-    // uint8_t customerIdMap[MAX_CUSTOMER_ID];
-    std::unordered_map<std::string, uint8_t> customerIdMap;
+    uint8_t customerIdMap[MAX_CUSTOMER_ID];
 
     // id -> name
-    // std::vector<node_name_t> siteNameMap;
-    std::vector<string> siteNameMap;
+    std::vector<node_name_t> siteNameMap;
 
     // name -> id
-    // uint8_t siteIdMap[MAX_SITE_ID];
-    std::unordered_map<std::string, uint8_t> siteIdMap;
+    uint8_t siteIdMap[MAX_SITE_ID];
 
     // 存放每一行的结果
     char outputBuffer[OUTPUT_BUFFER_SIZE];

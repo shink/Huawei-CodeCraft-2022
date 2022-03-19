@@ -42,8 +42,7 @@ void Handler::ReadDemand(const string &demandPath) {
     M = (uint8_t) (vec.size() - 1);
     customerNameMap.resize(M);
     for (uint8_t i = 0u; i < M; ++i) {
-        // node_name_t demandName = NodeName(vec[i + 1].c_str(), vec[i + 1].size());
-        string demandName = vec[i + 1];
+        node_name_t demandName = NodeName(vec[i + 1].c_str(), vec[i + 1].size());
         customerIdMap[demandName] = i;
         customerNameMap[i] = demandName;
     }
@@ -62,12 +61,8 @@ void Handler::ReadDemand(const string &demandPath) {
     ifs.close();
 
 #ifdef TEST
-    // for (node_name_t &name: customerNameMap) {
-    //     PrintLog("Customer id: %d, base62_name: %d, name: %s\n", customerIdMap[name], name, NodeNameString(name).c_str());
-    // }
-
-    for (string &name: customerNameMap) {
-        PrintLog("Customer id: %d,  name: %s\n", customerIdMap[name], name.c_str());
+    for (node_name_t &name: customerNameMap) {
+        PrintLog("Customer id: %d, base62_name: %d\n", customerIdMap[name], name);
     }
 #endif
 }
@@ -85,9 +80,7 @@ void Handler::ReadSiteBandwidth(const string &siteBandwidthPath) {
     uint8_t n = 0u;
     while (std::getline(ifs, line)) {
         ReadLine(line, vec);
-        // node_name_t siteName = NodeName(vec[0].c_str(), vec[0].size());
-        string siteName = vec[0];
-
+        node_name_t siteName = NodeName(vec[0].c_str(), vec[0].size());
         siteIdMap[siteName] = n++;
         siteNameMap.emplace_back(siteName);
         siteList.emplace_back(Site(atoi(vec[1].c_str())));
@@ -110,8 +103,7 @@ void Handler::ReadQos(const string &qosPath) {
 
     uint8_t tmpCustomerIdList[M];
     for (uint8_t i = 0u; i < M; ++i) {
-        // node_name_t demandName = NodeName(vec[i + 1].c_str(), vec[i + 1].size());
-        string demandName = vec[i + 1];
+        node_name_t demandName = NodeName(vec[i + 1].c_str(), vec[i + 1].size());
         tmpCustomerIdList[i] = customerIdMap[demandName];
     }
 
@@ -119,8 +111,7 @@ void Handler::ReadQos(const string &qosPath) {
     for (uint8_t n = 0u; n < N && std::getline(ifs, line); ++n) {
         ReadLine(line, vec);
 
-        // node_name_t siteName = NodeName(vec[0].c_str(), vec[0].size());
-        string siteName = vec[0];
+        node_name_t siteName = NodeName(vec[0].c_str(), vec[0].size());
 
         uint8_t siteId = siteIdMap[siteName];
         for (uint8_t m = 0u; m < M; ++m) {
@@ -179,18 +170,18 @@ void Handler::ReadLine(const string &line, std::vector<string> &vec) {
 /**
  * @brief 62 进制数转 char
  */
-string Handler::NodeNameString(const node_name_t &customerName) {
-    base62_t idx1 = (base62_t) (customerName / 62u), idx2 = customerName - idx1 * 62U;
+uint8_t Handler::NodeName(char *buffer, const node_name_t &nodeName) {
+    base62_t idx1 = (base62_t) (nodeName / 63u), idx2 = nodeName - idx1 * 63U;
     assert(idx1 >= 1 || idx2 >= 1);
 
-    string s;
     if (idx1 >= 1 && idx2 >= 1) {
-        s += BASE62[idx1 - 1];
-        s += BASE62[idx2 - 1];
+        *buffer = BASE62[idx1 - 1];
+        *(buffer + 1) = BASE62[idx2 - 1];
+        return 2u;
     } else {
-        s += BASE62[idx2 - 1];
+        *buffer = BASE62[idx2 - 1];
+        return 1u;
     }
-    return s;
 }
 
 /**
@@ -202,17 +193,25 @@ node_name_t Handler::NodeName(const char *buffer, uint8_t len) {
 }
 
 node_name_t Handler::NodeName(const char &ch) {
-    return Base62(ch);
+    return Base63(ch);
 }
 
 node_name_t Handler::NodeName(const char &ch1, const char &ch2) {
-    return Base62(ch1) * 62u + Base62(ch2);
+    return Base63(ch1) * 63u + Base63(ch2);
 }
 
 /**
- * char 转 62 进制数
+ * char 转 63 进制数，[0, 62]，0 表示为空
+ *
+ * example:
+ *  '' -> 0
+ *  '0' -> 1
+ *  'A' -> 11
+ *  'z' -> 62
+ *  '01' -> 1 * 63 + 2 = 65
+ *  'Cz' -> 14 * 63 + 62 = 944
  */
-base62_t Handler::Base62(const char &ch) {
+base62_t Handler::Base63(const char &ch) {
     return std::isdigit(ch) ? (ch - 47u) : (std::isupper(ch) ? (ch - 54u) : ch - 60u);
 }
 
@@ -234,7 +233,7 @@ void Handler::Handle() {
 
 #ifdef TEST
     std::chrono::duration<double, std::milli> duration = std::chrono::system_clock::now() - start;
-    PrintLog("Output elapsed time: %.4fms\n", duration.count());
+    PrintLog("Handle elapsed time: %.4fms\n", duration.count());
     Check();
 #endif
 }
@@ -245,25 +244,32 @@ void Handler::Output() {
     auto start = std::chrono::system_clock::now();
 #endif
 
-    std::ofstream ofs;
-    ofs.open(OUTPUT_PATH);
+    FILE *fp = fopen(OUTPUT_PATH, "w");
+
+    uint32_t outputIdx;
     for (uint16_t t = 0; t < T; ++t) {
         for (uint8_t m = 0; m < M; ++m) {
-            // std::string str = NodeNameString(customerNameMap[m]) + ":";
-            std::string str = customerNameMap[m] + ":";
+            outputIdx = 0u;
+            outputIdx += NodeName(outputBuffer + outputIdx, customerNameMap[m]);
+            outputBuffer[outputIdx++] = ':';
+
             for (uint8_t n = 0; n < N; ++n) {
                 if (result[t][m][n] > 0) {
-                    // str += "<" + NodeNameString(siteNameMap[n]) + "," + std::to_string(result[t][m][n]) + ">,";
-                    str += "<" + siteNameMap[n] + "," + std::to_string(result[t][m][n]) + ">,";
+                    outputBuffer[outputIdx++] = '<';
+                    outputIdx += NodeName(outputBuffer + outputIdx, siteNameMap[n]);
+                    outputBuffer[outputIdx++] = ',';
+                    outputIdx += Int2charArray(outputBuffer + outputIdx, result[t][m][n]);
+                    outputBuffer[outputIdx++] = '>';
+                    outputBuffer[outputIdx++] = ',';
                 }
             }
-            if (str.back() == ',') str.pop_back();
-            if (t < T - 1 || m < M - 1) str += '\n';
-            ofs << str;
-            // std::cout << str;
+            if (outputBuffer[outputIdx - 1] == ',') --outputIdx;
+            if (t < T - 1 || m < M - 1) outputBuffer[outputIdx++] = '\n';
+            fwrite(outputBuffer, outputIdx, sizeof(char), fp);
         }
     }
-    ofs.close();
+
+    fclose(fp);
 
 #ifdef TEST
     std::chrono::duration<double, std::milli> duration = std::chrono::system_clock::now() - start;
@@ -327,11 +333,21 @@ void Handler::HandlePerCustomer(const uint16_t &today, const uint8_t &customerId
 
 #ifdef TEST
         if (siteList[siteId].remainBandwidth < allocatedBandwidth) {
-            // PrintLog("Error, service (%d: %s) no enough space\n", siteId, NodeNameString(siteNameMap[siteId]).c_str());
-            PrintLog("Error, service (%d: %s) no enough space\n", siteId, siteNameMap[siteId].c_str());
+            PrintLog("Error, service %d no enough space\n", siteId);
         }
 #endif
 
         siteList[siteId].remainBandwidth -= allocatedBandwidth;
     }
+}
+
+uint8_t Handler::Int2charArray(char *buffer, bandwidth_t bandwidth) {
+    uint8_t size = 1u + (uint8_t) log10(bandwidth);
+    char *p = buffer + size - 1u;
+    for (uint8_t i = 0u; i < size; ++i) {
+        *p = (uint8_t) (bandwidth % 10u) + '0';
+        bandwidth /= 10u;
+        --p;
+    }
+    return size;
 }
