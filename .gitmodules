@@ -1,3 +1,6 @@
 [submodule "preliminary/CodeCraft2022-benchmark"]
 	path = preliminary/CodeCraft2022-benchmark
 	url = https://github.com/diphosphane/CodeCraft2022-benchmark.git
+[submodule "preliminary/CodeCraft2022-PressureGenerator"]
+	path = preliminary/CodeCraft2022-PressureGenerator
+	url = https://github.com/diphosphane/CodeCraft2022-PressureGenerator.git
