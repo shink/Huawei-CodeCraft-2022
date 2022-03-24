@@ -8,9 +8,7 @@
 
 #include "Handler.h"
 
-Handler::Handler() {
-    PrintLog("[Initializing]\n");
-}
+Handler::Handler() {}
 
 void Handler::Read() {
 #ifdef TEST
@@ -26,7 +24,31 @@ void Handler::Read() {
 #ifdef TEST
     std::chrono::duration<double, std::milli> duration = std::chrono::system_clock::now() - start;
     PrintLog("Read elapsed time: %.4fms\n", duration.count());
+    PrintLog("T: %d, M: %d, N: %d\n", T, M, N);
 #endif
+}
+
+void Handler::Initialize() {
+#ifdef TEST
+    PrintLog("[Initializing]\n");
+#endif
+
+    siteBandwidthList.resize(N, std::vector<SiteInfo>(T));
+    result.resize(T, std::vector<std::vector<bandwidth_t >>(M, std::vector<bandwidth_t>(N, 0u)));
+    siteBandwidthTimeSeries.resize(N, std::vector<std::pair<uint16_t, bandwidth_t >>(T));
+
+    customerOrderList.resize(M);
+    std::vector<std::pair<uint8_t, uint8_t>> serviceSiteCountList;
+    for (uint8_t m = 0u; m < M; ++m) {
+        serviceSiteCountList.emplace_back(m, (uint8_t) serviceSiteList[m].size());
+    }
+    std::sort(serviceSiteCountList.begin(), serviceSiteCountList.end(),
+              [](const std::pair<uint8_t, uint8_t> &a, const std::pair<uint8_t, uint8_t> &b) {
+                  return a.second < b.second;
+              });
+    for (uint8_t i = 0u; i < M; ++i) {
+        customerOrderList[i] = serviceSiteCountList[i].first;
+    }
 }
 
 void Handler::Handle() {
@@ -35,15 +57,14 @@ void Handler::Handle() {
     auto start = std::chrono::system_clock::now();
 #endif
 
-    bandwidthCapacityList.resize(N, std::vector<bandwidth_t>(T, 0u));
-    result.resize(T, std::vector<std::vector<bandwidth_t>>(M, std::vector<bandwidth_t>(N, 0u)));
+    Initialize();
 
     // 1. 事先把所有边缘节点的拉满机会用完
     // 所有边缘节点每天的负载需求，维度为 N x T
     std::vector<std::vector<bandwidth_t>> demandSumList(N, std::vector<bandwidth_t>(T, 0u));
     for (uint8_t n = 0u; n < N; ++n) {
         for (uint16_t t = 0u; t < T; ++t) {
-            bandwidthCapacityList[n][t] = siteList[n].capacity;
+            siteBandwidthList[n][t] = SiteInfo(siteList[n].capacity);
             const std::vector<uint8_t> &customerIdList = serviceCustomerList[n];
             for (const uint8_t &m: customerIdList) {
                 demandSumList[n][t] += bandwidthDemandList[t][m];
@@ -52,7 +73,7 @@ void Handler::Handle() {
     }
 
     // 依次处理负载最多的边缘节点
-    uint16_t totalChance = T - p95 - 1;
+    uint16_t totalChance = T - p95Idx - 1;
     for (uint16_t i = 0; i < N * totalChance; ++i) {
         bandwidth_t maxDemand = 0u;
         uint8_t n;
@@ -73,12 +94,14 @@ void Handler::Handle() {
         // 按照需求降序排序
         SortDemand(customerIdList, 0, (int) customerIdList.size() - 1, t);
 
-        bandwidth_t &capacity = bandwidthCapacityList[n][t];
+        bandwidth_t &capacity = siteBandwidthList[n][t].remainBandwidth;
         ++siteList[n].usedChance;
+        siteBandwidthList[n][t].alive = false;
 
         for (const uint8_t &m: customerIdList) {
             bandwidth_t allocatedBandwidth = std::min(demandOfDay[m], capacity);
             capacity -= allocatedBandwidth;
+            siteBandwidthList[n][t].allocatedBandwidth += allocatedBandwidth;
             demandOfDay[m] -= allocatedBandwidth;
             demandSumList[n][t] -= allocatedBandwidth;
             result[t][m][n] += allocatedBandwidth;
@@ -90,12 +113,12 @@ void Handler::Handle() {
 
     // 2. 后续采用均衡策略
     for (uint16_t t = 0u; t < T; ++t) {
-#ifdef TEST
-        if (t % 10 == 0) PrintLog("Handling %d day\n", t);
-#endif
-
         HandlePerDay(t);
+        // BalancePerDay(t);
     }
+
+    // 3. p95 均衡
+    // Balance();
 
 #ifdef TEST
     std::chrono::duration<double, std::milli> duration = std::chrono::system_clock::now() - start;
@@ -106,8 +129,8 @@ void Handler::Handle() {
 
 void Handler::HandlePerDay(const uint16_t &t) {
     // 处理每一个客户节点
-    for (uint8_t m = 0; m < M; ++m) {
-        HandlePerCustomer(t, m);
+    for (uint8_t i = 0; i < M; ++i) {
+        HandlePerCustomer(t, i);
     }
 }
 
@@ -121,7 +144,7 @@ void Handler::HandlePerCustomer(const uint16_t &t, const uint8_t &m) {
 
     for (uint8_t i = 0; i < size; ++i) {
         n = serviceSiteList[m][i];
-        sum += bandwidthCapacityList[n][t];
+        sum += siteBandwidthList[n][t].remainBandwidth;
     }
     assert(sum >= bandwidthDemand);
 
@@ -130,21 +153,23 @@ void Handler::HandlePerCustomer(const uint16_t &t, const uint8_t &m) {
     bandwidth_t allocatedBandwidth;
     for (uint8_t i = 0u; i < size; ++i) {
         n = serviceSiteList[m][i];
+        const bandwidth_t &remainBandwidth = siteBandwidthList[n][t].remainBandwidth;
         if (i != size - 1u) {
-            allocatedBandwidth = std::min(bandwidthCapacityList[n][t],
-                                          (bandwidth_t) floor(bandwidthDemand * 1.0 * bandwidthCapacityList[n][t] / sum));
+            allocatedBandwidth = std::min(remainBandwidth,
+                                          (bandwidth_t) floor(bandwidthDemand * 1.0 * remainBandwidth / sum));
 
             tmpSum += allocatedBandwidth;
         } else {
             allocatedBandwidth = bandwidthDemand - tmpSum;
         }
 
-        if (bandwidthCapacityList[n][t] < allocatedBandwidth) {
+        if (remainBandwidth < allocatedBandwidth) {
             while (allocatedBandwidth > 0) {
                 for (uint8_t j = 0u; j < size && allocatedBandwidth > 0; ++j) {
                     n = serviceSiteList[m][j];
-                    if (bandwidthCapacityList[n][t] > 0u) {
-                        --bandwidthCapacityList[n][t];
+                    if (siteBandwidthList[n][t].remainBandwidth > 0u) {
+                        --siteBandwidthList[n][t].remainBandwidth;
+                        ++siteBandwidthList[n][t].allocatedBandwidth;
                         --allocatedBandwidth;
                         ++resultOfDay[m][n];
                     }
@@ -154,8 +179,120 @@ void Handler::HandlePerCustomer(const uint16_t &t, const uint8_t &m) {
         }
 
         resultOfDay[m][n] += allocatedBandwidth;
-        bandwidthCapacityList[n][t] -= allocatedBandwidth;
+        siteBandwidthList[n][t].remainBandwidth -= allocatedBandwidth;
+        siteBandwidthList[n][t].allocatedBandwidth += allocatedBandwidth;
     }
+}
+
+void Handler::BalancePerDay(const uint16_t &t) {
+    // 将负载压力大于均值的非热点边缘节点迁移至小于均值的非热点边缘节点
+    bandwidth_t totalBandwidth, migratedBandwidth, originAllocatedBandwidth, destAllocatedBandwidth;;
+    uint8_t count = 0u;
+    for (uint8_t n = 0u; n < N; ++n) {
+        // 如果该边缘节点当天已拉满，则跳过
+        if (!siteBandwidthList[n][t].alive) continue;
+        ++count;
+        totalBandwidth += siteBandwidthList[n][t].allocatedBandwidth;
+    }
+    bandwidth_t averageBandwidth = totalBandwidth / count;
+    bool quit = false;
+
+    for (uint8_t originSiteId = 0u; originSiteId < N; ++originSiteId) {
+        originAllocatedBandwidth = siteBandwidthList[originSiteId][t].allocatedBandwidth;
+        if (originAllocatedBandwidth <= averageBandwidth) continue;
+
+        const std::vector<uint8_t> &serviceCustomerOfSite = serviceCustomerList[originSiteId];
+        for (const uint8_t &m: serviceCustomerOfSite) {
+
+            bandwidth_t &allocatedBandwidth = result[t][m][originSiteId];
+            const std::vector<uint8_t> &serviceSiteOfCustomer = serviceCustomerList[m];
+            for (const uint8_t &destSiteId: serviceSiteOfCustomer) {
+                destAllocatedBandwidth = siteBandwidthList[destSiteId][t].allocatedBandwidth;
+                if (originSiteId != destSiteId && destAllocatedBandwidth < averageBandwidth) {
+                    // 迁移
+                    migratedBandwidth = std::min(allocatedBandwidth, std::min(originAllocatedBandwidth - averageBandwidth,
+                                                                              averageBandwidth - destAllocatedBandwidth));
+                    allocatedBandwidth -= migratedBandwidth;
+                    result[t][m][destSiteId] += migratedBandwidth;
+                    siteBandwidthList[originSiteId][t].remainBandwidth += migratedBandwidth;
+                    siteBandwidthList[originSiteId][t].allocatedBandwidth -= migratedBandwidth;
+                    siteBandwidthList[destSiteId][t].remainBandwidth -= migratedBandwidth;
+                    siteBandwidthList[destSiteId][t].allocatedBandwidth += migratedBandwidth;
+
+                    quit = true;
+                    break;
+                }
+            }
+            if (quit) break;
+        }
+    }
+}
+
+/**
+ * @brief 均衡每个边缘节点的 p95Idx 值
+ */
+void Handler::Balance() {
+    std::pair<uint16_t, bandwidth_t> p95Info;
+
+    for (uint8_t n = 0u; n < N; ++n) {
+        // n 的 p95Idx 值及对应的天数
+        p95Info = GetP95Info(n);
+        uint16_t t = p95Info.first;
+        bandwidth_t p95 = p95Info.second;
+
+        // 尝试将带宽分配给其他兄弟节点
+        bandwidth_t brotherP95, brotherBandwidthTotal, migratedBandwidth;
+        uint16_t brotherP95Day;
+        const std::vector<uint8_t> &serviceCustomerOfSite = serviceCustomerList[n];
+        for (const uint8_t &m: serviceCustomerOfSite) {
+            bandwidth_t &allocatedBandwidth = result[t][m][n];
+            if (allocatedBandwidth == 0u) continue;
+
+            const std::vector<uint8_t> &serviceSiteOfCustomer = serviceCustomerList[m];
+            for (const uint8_t &brotherId: serviceSiteOfCustomer) {
+                if (allocatedBandwidth == 0u) break;
+                if (n == brotherId) continue;
+
+                // 兄弟节点对应的 p95Idx 值及对应的天数
+                p95Info = GetP95Info(brotherId);
+                brotherP95Day = p95Info.first;
+                brotherP95 = p95Info.second;
+
+                if (t == brotherP95Day) continue;
+
+                // 兄弟节点第 t 天的带宽负载
+                brotherBandwidthTotal = siteBandwidthList[brotherId][t].allocatedBandwidth;
+                if (brotherBandwidthTotal >= brotherP95) continue;
+
+                // 在不影响兄弟节点 p95Idx 值的前提下，取已分配带宽与兄弟节点能承受带宽的较小值
+                migratedBandwidth = std::min(allocatedBandwidth,
+                                             std::min(siteBandwidthList[brotherId][t].remainBandwidth, brotherP95 - brotherBandwidthTotal));
+
+                // 迁移
+                allocatedBandwidth -= migratedBandwidth;
+                result[t][m][brotherId] += migratedBandwidth;
+                siteBandwidthList[n][t].remainBandwidth += migratedBandwidth;
+                siteBandwidthList[n][t].allocatedBandwidth -= migratedBandwidth;
+                siteBandwidthList[brotherId][t].remainBandwidth -= migratedBandwidth;
+                siteBandwidthList[brotherId][t].allocatedBandwidth += migratedBandwidth;
+            }
+        }
+    }
+}
+
+std::pair<uint16_t, bandwidth_t> Handler::GetP95Info(const uint8_t &n) {
+    std::vector<std::pair<uint16_t, bandwidth_t>> &series = siteBandwidthTimeSeries[n];
+    for (uint16_t t = 0u; t < T; ++t) {
+        series[t].first = t;
+        series[t].second = siteBandwidthList[n][t].allocatedBandwidth;
+    }
+
+    std::sort(series.begin(), series.end(),
+              [](const std::pair<uint16_t, bandwidth_t> &a, const std::pair<uint16_t, bandwidth_t> &b) {
+                  return a.second < b.second;
+              });
+
+    return std::pair<uint16_t, bandwidth_t>({series[p95Idx].first, series[p95Idx].second});
 }
 
 void Handler::SortDemand(std::vector<uint8_t> &customerIdList, const int &left, const int &right, const uint16_t &t) {
@@ -225,7 +362,22 @@ void Handler::Check() {
                 PrintLog("Wrong answer, day: %d, demand: %d, sum: %d\n", t, tmpBandwidthDemandList[t][m], sum);
             }
         }
+
+        for (uint8_t n = 0u; n < N; ++n) {
+            bandwidth_t sum = 0u;
+            for (uint8_t m = 0u; m < M; ++m) {
+                sum += result[t][m][n];
+            }
+            assert(sum + siteBandwidthList[n][t].remainBandwidth == siteList[n].capacity);
+        }
     }
+
+    uint32_t cost = 0u;
+    for (uint8_t n = 0u; n < N; ++n) GetP95Info(n);
+    for (std::vector<std::pair<uint16_t, bandwidth_t>> &series: siteBandwidthTimeSeries) {
+        cost += series[p95Idx].second;
+    }
+    PrintLog("Total cost: %d\n", cost);
 #endif
 }
 
@@ -292,9 +444,11 @@ void Handler::ReadQos(const string &qosPath) {
     std::getline(ifs, line);
     std::vector<std::string> vec;
     ReadLine(line, vec);
-
     M = (uint8_t) (vec.size() - 1);
-    qosList.resize(M, std::vector<qos_t>(N, 0));
+
+    // QOS 列表，包含每个边缘节点到每个客户节点的时延
+    // 维度为 M x N
+    std::vector<std::vector<qos_t>> qosList(M, std::vector<qos_t>(N, 0));
     node_name_t demandName;
 
     // 客户节点名称和 ID 的映射关系
@@ -319,7 +473,7 @@ void Handler::ReadQos(const string &qosPath) {
 
     ifs.close();
 
-    // 每个客户节点的所有可服务的边缘节点
+    // 客户节点和边缘节点的关联关系
     serviceSiteList.resize(M);
     serviceCustomerList.resize(N);
     for (uint8_t m = 0; m < M; ++m) {
@@ -370,14 +524,11 @@ void Handler::ReadDemand(const string &demandPath) {
         ++t;
     }
     T = t;
-    p95 = (uint16_t) std::ceil(t * 0.95) - 1;
+    p95Idx = (uint16_t) std::ceil(t * 0.95) - 1;
     ifs.close();
 
 #ifdef TEST
     tmpBandwidthDemandList = bandwidthDemandList;
-    for (node_name_t &name: customerNameMap) {
-        PrintLog("Customer id: %d, base62_name: %d\n", customerIdMap[name], name);
-    }
 #endif
 }
 

@@ -23,9 +23,17 @@ public:
 
 private:
 
+    void Initialize();
+
     void HandlePerDay(const uint16_t &t);
 
     void HandlePerCustomer(const uint16_t &t, const uint8_t &m);
+
+    void BalancePerDay(const uint16_t &t);
+
+    void Balance();
+
+    std::pair<uint16_t, bandwidth_t> GetP95Info(const uint8_t &n);
 
     void SortDemand(std::vector<uint8_t> &customerIdList, const int &left, const int &right, const uint16_t &t);
 
@@ -72,7 +80,7 @@ private:
     uint8_t N{0u};
     uint8_t M{0u};
     uint16_t T{0u};
-    uint16_t p95{0u};   // 95 百分位带宽下标
+    uint16_t p95Idx{0u};   // 95 百分位带宽下标
     qos_t qosLimit{0u};
 
     // id -> name
@@ -105,13 +113,6 @@ private:
     std::vector<Site> siteList;
 
     /**
-     * 从 qos.csv 读入
-     * QOS 列表，包含每个边缘节点到每个客户节点的时延
-     * 维度为 M x N
-    */
-    std::vector<std::vector<qos_t>> qosList;
-
-    /**
      * 每个客户节点的所有可服务的边缘节点
      * 维度为 M x n
      */
@@ -127,7 +128,16 @@ private:
      * 所有边缘节点每天的剩余带宽
      * 维度为 N x T
      */
-    std::vector<std::vector<bandwidth_t>> bandwidthCapacityList;
+    std::vector<std::vector<SiteInfo>> siteBandwidthList;
+
+    /**
+     * 边缘节点分配带宽的时间序列
+     * 维度为 N x T x 2
+     */
+    std::vector<std::vector<std::pair<uint16_t, bandwidth_t>>> siteBandwidthTimeSeries;
+
+
+    std::vector<uint8_t> customerOrderList;
 
     /**
      * 计算结果

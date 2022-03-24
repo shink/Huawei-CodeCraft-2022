@@ -13,7 +13,7 @@
 #include <sys/stat.h>
 
 #define TEST
-// #define SIMULATE
+#define SIMULATE
 
 #ifdef TEST
 #define PrintLog(...)           \
@@ -64,5 +64,15 @@ struct Site {
     explicit Site(bandwidth_t bandwidth) : usedChance(0u), capacity(bandwidth) {}
 };
 
+
+struct SiteInfo {
+    bool alive{true};
+    bandwidth_t allocatedBandwidth{0u};
+    bandwidth_t remainBandwidth{0u};
+
+    SiteInfo() = default;
+
+    explicit SiteInfo(bandwidth_t bandwidth) : alive(true), allocatedBandwidth(0u), remainBandwidth(bandwidth) {}
+};
 
 #endif //HUAWEI_CODECRAFT_2022_STATEMENT_H
