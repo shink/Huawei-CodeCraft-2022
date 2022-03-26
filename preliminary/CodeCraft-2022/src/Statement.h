@@ -11,9 +11,10 @@
 
 #include <bits/stdc++.h>
 #include <sys/stat.h>
+#include <cstdint>
 
 #define TEST
-// #define SIMULATE
+#define SIMULATE
 
 #ifdef TEST
 #define PrintLog(...)           \
@@ -49,20 +50,37 @@ typedef uint8_t base62_t;
 typedef uint16_t node_name_t, qos_t;
 typedef uint32_t bandwidth_t;
 
-typedef enum {
-    // 活结点，表示 5% 次带宽拉满机会未用完
-    ALIVE,
+struct Edge {
+    int16_t next;   // 与该边同起点的下一条边的索引位置
+    uint8_t to;     // 该边的终点
+    bandwidth_t capacity;   // 该边的容量
 
-    // 死结点，表示所有带宽拉满机会未用完
-    DEAD
-} STATUS;
-
-struct Site {
-    uint16_t usedChance;
-    bandwidth_t capacity;
-
-    explicit Site(bandwidth_t bandwidth) : usedChance(0u), capacity(bandwidth) {}
+    explicit Edge(int16_t next, uint8_t to, bandwidth_t capacity) : next(next), to(to), capacity(capacity) {}
 };
 
+struct DailyDemand {
+    uint16_t dayId;
+    bandwidth_t bandwidthDemand;
+
+    explicit DailyDemand(uint16_t dayId, bandwidth_t bandwidthDemand) : dayId(dayId), bandwidthDemand(bandwidthDemand) {}
+};
+
+struct SiteNode {
+    uint8_t siteId;
+    uint8_t inDegree{0u};
+
+    explicit SiteNode(uint8_t siteId) : siteId(siteId), inDegree(1u) {}
+
+    explicit SiteNode(uint8_t siteId, uint8_t inDegree) : siteId(siteId), inDegree(inDegree) {}
+};
+
+struct SiteBandwidthInfo {
+    bandwidth_t allocatedBandwidth{0u};
+    bandwidth_t remainBandwidth{0u};
+
+    SiteBandwidthInfo() = default;
+
+    explicit SiteBandwidthInfo(bandwidth_t bandwidth) : allocatedBandwidth(0u), remainBandwidth(bandwidth) {}
+};
 
 #endif //HUAWEI_CODECRAFT_2022_STATEMENT_H

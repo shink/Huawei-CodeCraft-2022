@@ -23,11 +23,27 @@ public:
 
 private:
 
-    void HandlePerDay(const uint16_t &t);
+    void Initialize();
 
-    void HandlePerCustomer(const uint16_t &t, const uint8_t &m);
+    void UseUpChance();
 
-    void SortDemand(std::vector<uint8_t> &customerIdList, const int &left, const int &right, const uint16_t &t);
+    void HandleDailyDemand(const uint16_t &t);
+
+    void InitializeGraph(const uint16_t &t);
+
+    bandwidth_t Dinic();
+
+    bool Bfs();
+
+    bandwidth_t Dfs(const uint8_t &from, const bandwidth_t &capacity);
+
+    void AddEdge(const uint8_t &from, const uint8_t &to, const bandwidth_t &capacity);
+
+    void SetPrioritySiteList();
+
+    void AddPriorityNode();
+
+    void SortCustomerDailyDemand(std::vector<uint8_t> &customerIdList, const uint16_t &t);
 
     void Check();
 
@@ -57,6 +73,8 @@ private:
     static const uint8_t MAX_N = 135u;
     static const uint8_t MAX_M = 35u;
     static const uint16_t MAX_T = 8928u;
+    static const uint8_t MAX_NODE_COUNT = MAX_N + MAX_M + 2u;
+    const bandwidth_t INF = 0x3f3f3f3f;
 
     static const node_name_t MAX_CUSTOMER_ID = 62 * 63 + 63;
     static const node_name_t MAX_SITE_ID = 62 * 63 + 63;
@@ -72,19 +90,33 @@ private:
     uint8_t N{0u};
     uint8_t M{0u};
     uint16_t T{0u};
-    uint16_t p95{0u};   // 95 百分位带宽下标
+    uint16_t p95Idx{0u};   // 95 百分位带宽下标
     qos_t qosLimit{0u};
 
-    // id -> name
+    uint8_t vs{0u};  // 超级源
+    uint8_t vt{0u};  // 超级汇
+    uint8_t nodeCount{0u};  // 节点数量
+    uint16_t edgeCount{0u}; // 边数量
+
+    uint16_t graph[MAX_NODE_COUNT][MAX_NODE_COUNT];
+    std::vector<Edge> edgeList;         // 链式前向星，存放图中的所有边
+    int16_t head[MAX_NODE_COUNT];       // 节点的第一条边的索引位置，-1 表示没有边
+    int16_t cur[MAX_NODE_COUNT];        // 当前弧优化，DFS 时记录当前节点循环到了哪一条边，避免重复计算
+    uint8_t depth[MAX_NODE_COUNT];      // BFS 分层图中节点深度
+
+    bool aliveSiteList[MAX_N];          // 标记边缘节点是否在网络图中
+    uint8_t prioritySiteList[MAX_N];    // 边缘节点优先级队列
+
+    // dayId -> name
     std::vector<node_name_t> customerNameMap;
 
-    // name -> id
+    // name -> dayId
     uint8_t customerIdMap[MAX_CUSTOMER_ID];
 
-    // id -> name
+    // dayId -> name
     std::vector<node_name_t> siteNameMap;
 
-    // name -> id
+    // name -> dayId
     uint8_t siteIdMap[MAX_SITE_ID];
 
     // 存放每一行的结果
@@ -102,20 +134,13 @@ private:
      * 边缘节点列表，包含每个边缘节点的使用带宽和剩余带宽
      * 维度为 N
      */
-    std::vector<Site> siteList;
+    std::vector<bandwidth_t> siteCapacityList;
 
     /**
-     * 从 qos.csv 读入
-     * QOS 列表，包含每个边缘节点到每个客户节点的时延
-     * 维度为 M x N
-    */
-    std::vector<std::vector<qos_t>> qosList;
-
-    /**
-     * 每个客户节点的所有可服务的边缘节点
+     * 每个客户节点的所有可服务的边缘节点，按照边缘节点入度升序排列
      * 维度为 M x n
      */
-    std::vector<std::vector<uint8_t>> serviceSiteList;
+    std::vector<std::vector<SiteNode>> serviceSiteList;
 
     /**
      * 每个边缘节点的所有可服务的客户节点
@@ -124,13 +149,31 @@ private:
     std::vector<std::vector<uint8_t>> serviceCustomerList;
 
     /**
+     * 每个节点当天是否是热点
+     * 维度为 N x T
+     */
+    std::vector<std::vector<bool>> hotspotList;
+
+    /**
+     * 每天的带宽需求
+     * 维度为 T
+     */
+    std::vector<DailyDemand> dailyBandwidthDemandList;
+
+    /**
      * 所有边缘节点每天的剩余带宽
      * 维度为 N x T
      */
-    std::vector<std::vector<bandwidth_t>> bandwidthCapacityList;
+    std::vector<std::vector<SiteBandwidthInfo>> siteBandwidthList;
 
     /**
-     * 计算结果
+     * 边缘节点分配带宽的时间序列
+     * 维度为 N x T x 2
+     */
+    std::vector<std::vector<std::pair<uint16_t, bandwidth_t>>> siteBandwidthTimeSeries;
+
+    /**
+     * 最终结果
      * 维度为 T x M x N
      */
     std::vector<std::vector<std::vector<bandwidth_t>>> result;
