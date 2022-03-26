@@ -27,6 +27,8 @@ private:
 
     void UseUpChance();
 
+    void SetPrioritySiteList();
+
     void HandleDailyDemand(const uint16_t &t);
 
     void InitializeGraph(const uint16_t &t);
@@ -39,11 +41,7 @@ private:
 
     void AddEdge(const uint8_t &from, const uint8_t &to, const bandwidth_t &capacity);
 
-    void SetPrioritySiteList();
-
     void AddPriorityNode();
-
-    void SortCustomerDailyDemand(std::vector<uint8_t> &customerIdList, const uint16_t &t);
 
     void Check();
 
@@ -57,7 +55,7 @@ private:
 
     void ReadLine(const string &line, std::vector<string> &vec);
 
-    uint8_t Int2charArray(char *buffer, bandwidth_t bandwidth);
+    uint8_t IntToCharArray(char *buffer, bandwidth_t bandwidth);
 
     inline uint8_t NodeName(char *buffer, const node_name_t &nodeName);
 
@@ -93,54 +91,47 @@ private:
     uint16_t p95Idx{0u};   // 95 百分位带宽下标
     qos_t qosLimit{0u};
 
-    uint8_t vs{0u};  // 超级源
-    uint8_t vt{0u};  // 超级汇
+    uint8_t vs{0u};         // 超级源
+    uint8_t vt{0u};         // 超级汇
     uint8_t nodeCount{0u};  // 节点数量
     uint16_t edgeCount{0u}; // 边数量
 
     uint16_t graph[MAX_NODE_COUNT][MAX_NODE_COUNT];
-    std::vector<Edge> edgeList;         // 链式前向星，存放图中的所有边
-    int16_t head[MAX_NODE_COUNT];       // 节点的第一条边的索引位置，-1 表示没有边
-    int16_t cur[MAX_NODE_COUNT];        // 当前弧优化，DFS 时记录当前节点循环到了哪一条边，避免重复计算
-    uint8_t depth[MAX_NODE_COUNT];      // BFS 分层图中节点深度
+    std::vector<Edge> edgeList;                 // 链式前向星，存放图中的所有边
+    int16_t head[MAX_NODE_COUNT];               // 节点的第一条边的索引位置，-1 表示没有边
+    int16_t cur[MAX_NODE_COUNT];                // 当前弧优化，DFS 时记录当前节点循环到了哪一条边，避免重复计算
+    uint8_t depth[MAX_NODE_COUNT];              // BFS 分层图中节点深度
 
-    bool aliveSiteList[MAX_N];          // 标记边缘节点是否在网络图中
-    uint8_t prioritySiteList[MAX_N];    // 边缘节点优先级队列
+    bool aliveSiteList[MAX_N];                  // 标记边缘节点是否在网络图中
+    uint8_t prioritySiteList[MAX_N];            // 边缘节点优先级队列
 
-    // dayId -> name
-    std::vector<node_name_t> customerNameMap;
+    node_name_t customerNameMap[MAX_M];         // customerId -> name
+    uint8_t customerIdMap[MAX_CUSTOMER_ID];     // name -> customerId
 
-    // name -> dayId
-    uint8_t customerIdMap[MAX_CUSTOMER_ID];
+    node_name_t siteNameMap[MAX_N];             // siteId -> name
+    uint8_t siteIdMap[MAX_SITE_ID];             // name -> siteId
 
-    // dayId -> name
-    std::vector<node_name_t> siteNameMap;
-
-    // name -> dayId
-    uint8_t siteIdMap[MAX_SITE_ID];
-
-    // 存放每一行的结果
-    char outputBuffer[OUTPUT_BUFFER_SIZE];
-
-    /**
-     * 从 demand.csv 读入
-     * 客户节点的带宽需求列表，包含所有客户节点在不同时刻的带宽需求信息
-     * 维度为 T x M
-     */
-    std::vector<std::vector<bandwidth_t>> bandwidthDemandList;
+    char outputBuffer[OUTPUT_BUFFER_SIZE];      // 存放每一行的结果
 
     /**
      * 从 site_bandwidth.csv 读入
      * 边缘节点列表，包含每个边缘节点的使用带宽和剩余带宽
      * 维度为 N
      */
-    std::vector<bandwidth_t> siteCapacityList;
+    bandwidth_t siteCapacityList[MAX_N];
+
+    /**
+     * 从 demand.csv 读入
+     * 客户节点的带宽需求列表，包含所有客户节点在不同时刻的带宽需求信息
+     * 维度为 T x M
+     */
+    std::vector<std::vector<bandwidth_t>> customerDemandList;
 
     /**
      * 每个客户节点的所有可服务的边缘节点，按照边缘节点入度升序排列
      * 维度为 M x n
      */
-    std::vector<std::vector<SiteNode>> serviceSiteList;
+    std::vector<std::vector<uint8_t>> serviceSiteList;
 
     /**
      * 每个边缘节点的所有可服务的客户节点
@@ -149,28 +140,10 @@ private:
     std::vector<std::vector<uint8_t>> serviceCustomerList;
 
     /**
-     * 每个节点当天是否是热点
+     * 边缘节点某天是否是热点
      * 维度为 N x T
      */
     std::vector<std::vector<bool>> hotspotList;
-
-    /**
-     * 每天的带宽需求
-     * 维度为 T
-     */
-    std::vector<DailyDemand> dailyBandwidthDemandList;
-
-    /**
-     * 所有边缘节点每天的剩余带宽
-     * 维度为 N x T
-     */
-    std::vector<std::vector<SiteBandwidthInfo>> siteBandwidthList;
-
-    /**
-     * 边缘节点分配带宽的时间序列
-     * 维度为 N x T x 2
-     */
-    std::vector<std::vector<std::pair<uint16_t, bandwidth_t>>> siteBandwidthTimeSeries;
 
     /**
      * 最终结果
@@ -180,7 +153,7 @@ private:
 
 #ifdef TEST
     /**
-     * 用于检查，同 {@code bandwidthDemandList}
+     * 用于检查，同 {@code customerDemandList}
      * 客户节点的带宽需求列表，包含所有客户节点在不同时刻的带宽需求信息
      */
     std::vector<std::vector<bandwidth_t>> tmpBandwidthDemandList;

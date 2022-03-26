@@ -28,34 +28,6 @@ void Handler::Read() {
 #endif
 }
 
-void Handler::Initialize() {
-#ifdef TEST
-    PrintLog("[Initializing]\n");
-#endif
-
-    vs = 0u;
-    vt = M + N + 1u;
-    nodeCount = M + N + 2u;
-    siteBandwidthList.resize(N, std::vector<SiteBandwidthInfo>(T));
-    result.resize(T, std::vector<std::vector<bandwidth_t >>(M, std::vector<bandwidth_t>(N, 0u)));
-    siteBandwidthTimeSeries.resize(N, std::vector<std::pair<uint16_t, bandwidth_t >>(T));
-    hotspotList.resize(N, std::vector<bool>(T, false));
-
-    // 按照边缘节点入度升序排列
-    for (uint8_t m = 0; m < M; ++m) {
-        std::vector<SiteNode> &siteList = serviceSiteList[m];
-        for (SiteNode &siteNode: siteList) {
-            siteNode.inDegree = serviceCustomerList[siteNode.siteId].size();
-        }
-        std::sort(siteList.begin(), siteList.end(), [](const SiteNode &a, const SiteNode &b) {
-            return a.inDegree < b.inDegree;
-        });
-    }
-
-    // 设置边缘节点优先级列表
-    SetPrioritySiteList();
-}
-
 void Handler::Handle() {
 #ifdef TEST
     std::cout << "[Handling]" << std::endl;
@@ -63,18 +35,24 @@ void Handler::Handle() {
 #endif
 
     Initialize();
-    // UseUpChance();
+    UseUpChance();
 
     // 按每日总需求降序处理
-    std::sort(dailyBandwidthDemandList.begin(), dailyBandwidthDemandList.end(), [](const DailyDemand &a, const DailyDemand &b) {
-        return a.bandwidthDemand > b.bandwidthDemand;
-    });
+    std::vector<std::pair<uint16_t, bandwidth_t>> dailyBandwidthDemandList(T);
+    for (uint16_t t = 0u; t < T; ++t) {
+        dailyBandwidthDemandList[t] = std::pair<uint16_t, bandwidth_t>(t, std::accumulate(customerDemandList[t].begin(), customerDemandList[t].begin(), 0u));
+    }
+    std::sort(dailyBandwidthDemandList.begin(), dailyBandwidthDemandList.end(),
+              [](const std::pair<uint16_t, bandwidth_t> &a, const std::pair<uint16_t, bandwidth_t> &b) {
+                  return a.second > b.second;
+              });
+
     uint16_t t;
     for (uint16_t i = 0u; i < T; ++i) {
-        t = dailyBandwidthDemandList[i].dayId;
+        t = dailyBandwidthDemandList[i].first;
 
 #ifdef TEST
-        PrintLog("Handling %d day\n", t);
+        if (i % 100 == 0u) PrintLog("Handling %d day, (%d/%d)\n", t, i, T);
 #endif
 
         HandleDailyDemand(t);
@@ -87,67 +65,34 @@ void Handler::Handle() {
 #endif
 }
 
+void Handler::Initialize() {
+#ifdef TEST
+    PrintLog("[Initializing]\n");
+#endif
+
+    vs = 0u;
+    vt = M + N + 1u;
+    nodeCount = M + N + 2u;
+    result.resize(T, std::vector<std::vector<bandwidth_t >>(M, std::vector<bandwidth_t>(N, 0u)));
+    hotspotList.resize(N, std::vector<bool>(T, false));
+
+    // 设置边缘节点优先级列表
+    SetPrioritySiteList();
+}
+
 /**
  * @brief 事先把所有边缘节点的拉满机会用完
  */
 void Handler::UseUpChance() {
     // TODO
-
-    // 每个边缘的拉满次数，不能超过 5% * T
+    // 每个边缘节点的拉满次数，不能超过 5% * T
     std::vector<uint16_t> counts(N, 0u);
+}
 
-    uint16_t totalChance = T - p95Idx - 1;
-    for (uint16_t i = 0; i < N * totalChance; ++i) {
-        bool quit = false;
-
-        // 按每日总需求降序处理
-        std::sort(dailyBandwidthDemandList.begin(), dailyBandwidthDemandList.end(), [](const DailyDemand &a, const DailyDemand &b) {
-            return a.bandwidthDemand > b.bandwidthDemand;
-        });
-
-        for (uint16_t j = 0u; j < T && !quit; ++j) {
-            DailyDemand &dailyDemand = dailyBandwidthDemandList[j];
-            uint16_t t = dailyDemand.dayId;
-
-            // 按客户节点当天的带宽需求降序处理
-            std::vector<bandwidth_t> &customerDailyDemandList = bandwidthDemandList[t];
-            std::vector<std::pair<uint8_t, bandwidth_t>> customerOrderList(M);
-            for (uint8_t m = 0u; m < M; ++m) {
-                customerOrderList[m] = std::pair<uint8_t, bandwidth_t>(m, customerDailyDemandList[m]);
-            }
-            std::sort(customerOrderList.begin(), customerOrderList.end(),
-                      [](const std::pair<uint8_t, bandwidth_t> &a, const std::pair<uint8_t, bandwidth_t> &b) {
-                          return a.second > b.second;
-                      });
-
-            for (uint8_t k = 0u; k < M && !quit; ++k) {
-                // 将客户节点所连接的入度最少的边缘节点拉满
-                uint8_t customerId = customerOrderList[k].first;
-                const std::vector<SiteNode> &siteList = serviceSiteList[customerId];
-                for (const SiteNode &site: siteList) {
-                    uint8_t n = site.siteId;
-                    if (counts[n] >= totalChance || hotspotList[n][t]) continue;
-
-                    ++counts[n];
-                    hotspotList[n][t] = true;
-                    quit = true;
-
-                    bandwidth_t &capacity = siteBandwidthList[n][t].remainBandwidth;
-                    std::vector<uint8_t> &customerIdList = serviceCustomerList[n];
-
-                    // 按客户节点带宽需求降序处理
-                    SortCustomerDailyDemand(customerIdList, t);
-
-                    for (const uint8_t &m: customerIdList) {
-                        bandwidth_t allocatedBandwidth = std::min(customerDailyDemandList[m], capacity);
-                        capacity -= allocatedBandwidth;
-                        customerDailyDemandList[m] -= allocatedBandwidth;
-                        dailyDemand.bandwidthDemand -= allocatedBandwidth;
-                        // result[t][m][n] += allocatedBandwidth;
-                    }
-                }
-            }
-        }
+void Handler::SetPrioritySiteList() {
+    // TODO
+    for (uint8_t i = 0u; i < N; ++i) {
+        prioritySiteList[i] = i;
     }
 }
 
@@ -155,15 +100,11 @@ void Handler::HandleDailyDemand(const uint16_t &t) {
     // 初始化边缘节点使用情况
     memset(aliveSiteList, 0, sizeof(aliveSiteList));
 
-#ifdef TEST
-    for (const bool &b: aliveSiteList) assert(!b);
-#endif
-
     // 构造初始图，只包含超级源、超级汇、所有客户节点、当天的热点边缘节点
     InitializeGraph(t);
 
     // 跑最大流，尝试用所有热点边缘节点填满客户需求
-    bandwidth_t dailyDemand = accumulate(bandwidthDemandList[t].begin(), bandwidthDemandList[t].end(), 0u);
+    bandwidth_t dailyDemand = std::accumulate(customerDemandList[t].begin(), customerDemandList[t].end(), 0u);
     bandwidth_t maxFlow = 0u;
     while (maxFlow < dailyDemand) {
         maxFlow += Dinic();
@@ -184,18 +125,11 @@ void Handler::HandleDailyDemand(const uint16_t &t) {
 }
 
 void Handler::InitializeGraph(const uint16_t &t) {
-    const std::vector<bandwidth_t> &dailyDemandList = bandwidthDemandList[t];
+    const std::vector<bandwidth_t> &dailyDemandList = customerDemandList[t];
     edgeCount = 0u;
     edgeList.clear();
     std::memset(head, -1, sizeof(head));
     for (uint8_t i = 0u; i < nodeCount; ++i) std::memset(graph[i], 0, sizeof(graph[i]));
-
-#ifdef TEST
-    for (uint8_t i = 0u; i < nodeCount; ++i) assert(head[i] == -1);
-    for (uint8_t i = 0u; i < nodeCount; ++i) {
-        for (uint8_t j = 0u; j < nodeCount; ++j) assert(graph[i][j] == 0u);
-    }
-#endif
 
     // 所有客户节点连接超级源，容量为带宽需求
     for (uint8_t m = 0u; m < M; ++m) {
@@ -284,13 +218,6 @@ void Handler::AddEdge(const uint8_t &from, const uint8_t &to, const bandwidth_t 
     graph[from][to] = edgeCount++;
 }
 
-void Handler::SetPrioritySiteList() {
-    // TODO
-    for (uint8_t i = 0u; i < N; ++i) {
-        prioritySiteList[i] = i;
-    }
-}
-
 void Handler::AddPriorityNode() {
     uint8_t n, from, to;
     for (uint8_t i = 0u; i < N; i++) {
@@ -307,24 +234,6 @@ void Handler::AddPriorityNode() {
         // 边缘节点连接超级汇
         AddEdge(to, vt, siteCapacityList[n]);
         AddEdge(vt, to, 0u);
-    }
-}
-
-/**
- * @brief 按用户需求降序排序
- */
-void Handler::SortCustomerDailyDemand(std::vector<uint8_t> &customerIdList, const uint16_t &t) {
-    std::vector<std::pair<uint8_t, bandwidth_t>> demandInfoList;
-    const std::vector<bandwidth_t> &customerDailyDemandList = bandwidthDemandList[t];
-    for (const uint8_t &m: customerIdList) {
-        demandInfoList.emplace_back(m, customerDailyDemandList[m]);
-    }
-    std::sort(demandInfoList.begin(), demandInfoList.end(),
-              [](const std::pair<uint8_t, bandwidth_t> &a, const std::pair<uint8_t, bandwidth_t> &b) {
-                  return a.second > b.second;
-              });
-    for (uint8_t i = 0u; i < (uint8_t) customerIdList.size(); ++i) {
-        customerIdList[i] = demandInfoList[i].first;
     }
 }
 
@@ -348,7 +257,7 @@ void Handler::Output() {
                     outputBuffer[outputIdx++] = '<';
                     outputIdx += NodeName(outputBuffer + outputIdx, siteNameMap[n]);
                     outputBuffer[outputIdx++] = ',';
-                    outputIdx += Int2charArray(outputBuffer + outputIdx, result[t][m][n]);
+                    outputIdx += IntToCharArray(outputBuffer + outputIdx, result[t][m][n]);
                     outputBuffer[outputIdx++] = '>';
                     outputBuffer[outputIdx++] = ',';
                 }
@@ -379,6 +288,22 @@ void Handler::Check() {
             }
         }
     }
+
+    // 计算总成本
+    bandwidth_t cost = 0u;
+    std::vector<bandwidth_t> bandwidthList(T, 0u);
+    for (uint8_t n = 0u; n < N; ++n) {
+        for (uint16_t t = 0u; t < T; ++t) {
+            bandwidth_t sum = 0u;
+            for (uint8_t m = 0u; m < M; ++m) {
+                sum += result[t][m][n];
+            }
+            bandwidthList[t] = sum;
+        }
+        std::sort(bandwidthList.begin(), bandwidthList.end());
+        cost += bandwidthList[p95Idx];
+    }
+    PrintLog("cost: %d\n", cost);
 #endif
 }
 
@@ -418,9 +343,9 @@ void Handler::ReadSiteBandwidth(const string &siteBandwidthPath) {
     while (std::getline(ifs, line)) {
         ReadLine(line, vec);
         node_name_t siteName = NodeName(vec[0].c_str(), vec[0].size());
-        siteIdMap[siteName] = n++;
-        siteNameMap.emplace_back(siteName);
-        siteCapacityList.emplace_back(atoi(vec[1].c_str()));
+        siteIdMap[siteName] = n;
+        siteNameMap[n] = siteName;
+        siteCapacityList[n++] = atoi(vec[1].c_str());
     }
     N = n;
     ifs.close();
@@ -453,7 +378,6 @@ void Handler::ReadQos(const string &qosPath) {
     node_name_t demandName;
 
     // 客户节点名称和 ID 的映射关系
-    customerNameMap.resize(M);
     for (uint8_t i = 0u; i < M; ++i) {
         demandName = NodeName(vec[i + 1].c_str(), vec[i + 1].size());
         customerIdMap[demandName] = i;
@@ -480,7 +404,7 @@ void Handler::ReadQos(const string &qosPath) {
     for (uint8_t m = 0; m < M; ++m) {
         for (uint8_t n = 0; n < N; ++n) {
             if (qosList[m][n] < qosLimit) {
-                serviceSiteList[m].emplace_back(SiteNode(n));
+                serviceSiteList[m].emplace_back(n);
                 serviceCustomerList[n].emplace_back(m);
             }
         }
@@ -516,24 +440,20 @@ void Handler::ReadDemand(const string &demandPath) {
 
     // 读取剩余行
     uint16_t t = 0u;
-    bandwidth_t bandwidthPerDay, bandwidth;
     while (std::getline(ifs, line)) {
         ReadLine(line, vec);
-        bandwidthPerDay = 0u;
-        bandwidthDemandList.emplace_back(std::vector<bandwidth_t>(M));
+        customerDemandList.emplace_back(std::vector<bandwidth_t>(M));
         for (uint8_t i = 0u; i < M; ++i) {
-            bandwidth = atoi(vec[i + 1u].c_str());
-            bandwidthDemandList[t][tmpCustomerIdList[i]] = bandwidth;
-            bandwidthPerDay += bandwidth;
+            customerDemandList[t][tmpCustomerIdList[i]] = atoi(vec[i + 1u].c_str());
         }
-        dailyBandwidthDemandList.emplace_back(DailyDemand(t++, bandwidthPerDay));
+        ++t;
     }
     T = t;
     p95Idx = (uint16_t) std::ceil(t * 0.95) - 1;
     ifs.close();
 
 #ifdef TEST
-    tmpBandwidthDemandList = bandwidthDemandList;
+    tmpBandwidthDemandList = customerDemandList;
 #endif
 }
 
@@ -600,7 +520,7 @@ base62_t Handler::Base63(const char &ch) {
     return std::isdigit(ch) ? (ch - 47u) : (std::isupper(ch) ? (ch - 54u) : ch - 60u);
 }
 
-uint8_t Handler::Int2charArray(char *buffer, bandwidth_t bandwidth) {
+uint8_t Handler::IntToCharArray(char *buffer, bandwidth_t bandwidth) {
     uint8_t size = 1u + (uint8_t) log10(bandwidth);
     char *p = buffer + size - 1u;
     for (uint8_t i = 0u; i < size; ++i) {

@@ -58,22 +58,6 @@ struct Edge {
     explicit Edge(int16_t next, uint8_t to, bandwidth_t capacity) : next(next), to(to), capacity(capacity) {}
 };
 
-struct DailyDemand {
-    uint16_t dayId;
-    bandwidth_t bandwidthDemand;
-
-    explicit DailyDemand(uint16_t dayId, bandwidth_t bandwidthDemand) : dayId(dayId), bandwidthDemand(bandwidthDemand) {}
-};
-
-struct SiteNode {
-    uint8_t siteId;
-    uint8_t inDegree{0u};
-
-    explicit SiteNode(uint8_t siteId) : siteId(siteId), inDegree(1u) {}
-
-    explicit SiteNode(uint8_t siteId, uint8_t inDegree) : siteId(siteId), inDegree(inDegree) {}
-};
-
 struct SiteBandwidthInfo {
     bandwidth_t allocatedBandwidth{0u};
     bandwidth_t remainBandwidth{0u};
