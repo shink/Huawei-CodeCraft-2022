@@ -72,6 +72,7 @@ private:
     static const uint8_t MAX_M = 35u;
     static const uint16_t MAX_T = 8928u;
     static const uint8_t MAX_NODE_COUNT = MAX_N + MAX_M + 2u;
+    static const uint16_t MAX_EDGE_COUNT = (MAX_M + MAX_M * MAX_N + MAX_N) * 2;
     const bandwidth_t INF = 0x3f3f3f3f;
 
     static const node_name_t MAX_CUSTOMER_ID = 62 * 63 + 63;
@@ -91,13 +92,14 @@ private:
     uint16_t p95Idx{0u};   // 95 百分位带宽下标
     qos_t qosLimit{0u};
 
-    uint8_t vs{0u};         // 超级源
-    uint8_t vt{0u};         // 超级汇
-    uint8_t nodeCount{0u};  // 节点数量
-    uint16_t edgeCount{0u}; // 边数量
+    uint8_t vs{0u};             // 超级源
+    uint8_t vt{0u};             // 超级汇
+    uint8_t nodeCount{0u};      // 节点数量
+    uint16_t edgeCount{0u};     // 边数量
+    uint8_t priorityIdx{0u};    // 优先级列表索引
 
     uint16_t graph[MAX_NODE_COUNT][MAX_NODE_COUNT];
-    std::vector<Edge> edgeList;                 // 链式前向星，存放图中的所有边
+    Edge edgeList[MAX_EDGE_COUNT];              // 链式前向星，存放图中的所有边
     int16_t head[MAX_NODE_COUNT];               // 节点的第一条边的索引位置，-1 表示没有边
     int16_t cur[MAX_NODE_COUNT];                // 当前弧优化，DFS 时记录当前节点循环到了哪一条边，避免重复计算
     uint8_t depth[MAX_NODE_COUNT];              // BFS 分层图中节点深度
@@ -150,14 +152,6 @@ private:
      * 维度为 T x M x N
      */
     std::vector<std::vector<std::vector<bandwidth_t>>> result;
-
-#ifdef TEST
-    /**
-     * 用于检查，同 {@code customerDemandList}
-     * 客户节点的带宽需求列表，包含所有客户节点在不同时刻的带宽需求信息
-     */
-    std::vector<std::vector<bandwidth_t>> tmpBandwidthDemandList;
-#endif
 };
 
 

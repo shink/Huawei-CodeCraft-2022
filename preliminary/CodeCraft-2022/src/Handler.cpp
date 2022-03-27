@@ -34,25 +34,18 @@ void Handler::Handle() {
     auto start = std::chrono::system_clock::now();
 #endif
 
+    // 初始化数据结构
     Initialize();
+
+    // 标记所有边缘节点拉满的 5% 天
     UseUpChance();
 
-    // 按每日总需求降序处理
-    std::vector<std::pair<uint16_t, bandwidth_t>> dailyBandwidthDemandList(T);
+    // 设置边缘节点优先级列表
+    SetPrioritySiteList();
+
     for (uint16_t t = 0u; t < T; ++t) {
-        dailyBandwidthDemandList[t] = std::pair<uint16_t, bandwidth_t>(t, std::accumulate(customerDemandList[t].begin(), customerDemandList[t].begin(), 0u));
-    }
-    std::sort(dailyBandwidthDemandList.begin(), dailyBandwidthDemandList.end(),
-              [](const std::pair<uint16_t, bandwidth_t> &a, const std::pair<uint16_t, bandwidth_t> &b) {
-                  return a.second > b.second;
-              });
-
-    uint16_t t;
-    for (uint16_t i = 0u; i < T; ++i) {
-        t = dailyBandwidthDemandList[i].first;
-
 #ifdef TEST
-        if (i % 100 == 0u) PrintLog("Handling %d day, (%d/%d)\n", t, i, T);
+        if (t % 100 == 0u) PrintLog("Handling (%d/%d) day\n", t, T);
 #endif
 
         HandleDailyDemand(t);
@@ -75,9 +68,6 @@ void Handler::Initialize() {
     nodeCount = M + N + 2u;
     result.resize(T, std::vector<std::vector<bandwidth_t >>(M, std::vector<bandwidth_t>(N, 0u)));
     hotspotList.resize(N, std::vector<bool>(T, false));
-
-    // 设置边缘节点优先级列表
-    SetPrioritySiteList();
 }
 
 /**
@@ -86,7 +76,7 @@ void Handler::Initialize() {
 void Handler::UseUpChance() {
     // TODO
     // 每个边缘节点的拉满次数，不能超过 5% * T
-    std::vector<uint16_t> counts(N, 0u);
+    // std::vector<uint16_t> counts(N, 0u);
 }
 
 void Handler::SetPrioritySiteList() {
@@ -99,6 +89,7 @@ void Handler::SetPrioritySiteList() {
 void Handler::HandleDailyDemand(const uint16_t &t) {
     // 初始化边缘节点使用情况
     memset(aliveSiteList, 0, sizeof(aliveSiteList));
+    priorityIdx = 0u;
 
     // 构造初始图，只包含超级源、超级汇、所有客户节点、当天的热点边缘节点
     InitializeGraph(t);
@@ -127,14 +118,15 @@ void Handler::HandleDailyDemand(const uint16_t &t) {
 void Handler::InitializeGraph(const uint16_t &t) {
     const std::vector<bandwidth_t> &dailyDemandList = customerDemandList[t];
     edgeCount = 0u;
-    edgeList.clear();
     std::memset(head, -1, sizeof(head));
     for (uint8_t i = 0u; i < nodeCount; ++i) std::memset(graph[i], 0, sizeof(graph[i]));
 
     // 所有客户节点连接超级源，容量为带宽需求
     for (uint8_t m = 0u; m < M; ++m) {
-        AddEdge(vs, m + 1u, dailyDemandList[m]);
-        AddEdge(m + 1u, vs, 0u);
+        if (dailyDemandList[m] > 0u) {
+            AddEdge(vs, m + 1u, dailyDemandList[m]);
+            AddEdge(m + 1u, vs, 0u);
+        }
     }
 
     // 客户节点与热点边缘节点连接，热点与超级汇连接
@@ -213,17 +205,21 @@ bandwidth_t Handler::Dfs(const uint8_t &from, const bandwidth_t &capacity) {
 }
 
 void Handler::AddEdge(const uint8_t &from, const uint8_t &to, const bandwidth_t &capacity) {
-    edgeList.emplace_back(Edge(head[from], to, capacity));
+    edgeList[edgeCount].next = head[from];
+    edgeList[edgeCount].to = to;
+    edgeList[edgeCount].capacity = capacity;
     head[from] = (int16_t) edgeCount;
     graph[from][to] = edgeCount++;
 }
 
 void Handler::AddPriorityNode() {
     uint8_t n, from, to;
-    for (uint8_t i = 0u; i < N; i++) {
+    for (uint8_t i = priorityIdx; i < N; ++i) {
         n = prioritySiteList[i];
         if (aliveSiteList[n]) continue;
 
+        aliveSiteList[n] = true;
+        priorityIdx = i + 1u;
         to = M + n + 1u;
         // 边缘节点连接客户节点
         for (uint8_t &m: serviceCustomerList[n]) {
@@ -234,6 +230,7 @@ void Handler::AddPriorityNode() {
         // 边缘节点连接超级汇
         AddEdge(to, vt, siteCapacityList[n]);
         AddEdge(vt, to, 0u);
+        return;
     }
 }
 
@@ -283,8 +280,8 @@ void Handler::Check() {
         for (uint8_t m = 0u; m < M; ++m) {
             bandwidth_t sum = 0u;
             for (uint8_t n = 0u; n < N; ++n) sum += result[t][m][n];
-            if (sum != tmpBandwidthDemandList[t][m]) {
-                PrintLog("Wrong answer, day: %d, demand: %d, sum: %d\n", t, tmpBandwidthDemandList[t][m], sum);
+            if (sum != customerDemandList[t][m]) {
+                PrintLog("Wrong answer, day: %d, demand: %d, sum: %d\n", t, customerDemandList[t][m], sum);
             }
         }
     }
@@ -451,10 +448,6 @@ void Handler::ReadDemand(const string &demandPath) {
     T = t;
     p95Idx = (uint16_t) std::ceil(t * 0.95) - 1;
     ifs.close();
-
-#ifdef TEST
-    tmpBandwidthDemandList = customerDemandList;
-#endif
 }
 
 void Handler::ReadLine(const string &line, std::vector<string> &vec) {

@@ -51,20 +51,14 @@ typedef uint16_t node_name_t, qos_t;
 typedef uint32_t bandwidth_t;
 
 struct Edge {
-    int16_t next;   // 与该边同起点的下一条边的索引位置
-    uint8_t to;     // 该边的终点
-    bandwidth_t capacity;   // 该边的容量
+    int16_t next{-1};           // 与该边同起点的下一条边的索引位置
+    uint8_t to{0u};             // 该边的终点
+    bandwidth_t capacity{0u};   // 该边的容量
+
+    Edge() = default;
 
     explicit Edge(int16_t next, uint8_t to, bandwidth_t capacity) : next(next), to(to), capacity(capacity) {}
 };
 
-struct SiteBandwidthInfo {
-    bandwidth_t allocatedBandwidth{0u};
-    bandwidth_t remainBandwidth{0u};
-
-    SiteBandwidthInfo() = default;
-
-    explicit SiteBandwidthInfo(bandwidth_t bandwidth) : allocatedBandwidth(0u), remainBandwidth(bandwidth) {}
-};
 
 #endif //HUAWEI_CODECRAFT_2022_STATEMENT_H
